@@ -12,17 +12,6 @@ require "common"
 
 local DEFAULT_WIDTH, DEFAULT_HEIGHT = 640, 480
 
-local uartID = 1
-
-uart.on(
-	uartID,
-	"receive",
-	function()
-		sys.publish("UARTA_RECEIVE")
-	end
-)
-uart.setup(uartID, 115200, 8, uart.PAR_NONE, uart.STOP_1, nil, 1)
-
 sys.taskInit(
 	function()
 		sys.wait(5000)
@@ -671,6 +660,7 @@ local gc0310_ddr_big = {
 	}
 }
 
+local REGION_ID = "cn-shanghai"
 --三元组信息
 local PRODUCT_KEY = "k0qdbly6K5r"
 local DEVICE_NAME = "Air724UG"
@@ -709,11 +699,8 @@ local sConnected
 
 local publishCnt = 1
 
-local function publishTestCb(result, para)
-	log.info("Mqtt.QoS", result, para)
-end
-
---发布一条QOS为1的消息
+--发布消息
+--API：aLiYun.publish(topic, payload, qos, cbFnc, cbPara)
 function publishTest()
 	if sConnected then
 		aLiYun.publish(
@@ -726,12 +713,15 @@ function publishTest()
 	end
 end
 
----数据接收的处理函数
-local function rcvCbFnc(topic, qos, payload)
-	log.info("testALiYun.rcvCbFnc", topic, qos, payload)
+--消息发布结果的回调函数
+--cbFnc(result,cbPara)
+--result为true表示发布成功，false或者nil表示订阅失败
+--cbPara为本接口中的第5个参数
+local function publishTestCb(result, para)
+	log.info("Mqtt.QoS", result, para)
 end
 
---- 连接结果的处理函数
+--- 订阅主题，绑定回调函数
 -- @bool result，连接结果，true表示连接成功，false或者nil表示连接失败
 local function connectCbFnc(result)
 	log.info("testALiYun.connectCbFnc", result)
@@ -739,9 +729,15 @@ local function connectCbFnc(result)
 	if result then
 		--订阅主题，不需要考虑订阅结果，如果订阅失败，aLiYun库中会自动重连
 		aLiYun.on("receive", rcvCbFnc)
+		--PUBLISH消息测试
+		publishTest()
 	end
 end
 
+---数据接收回调函数
+local function rcvCbFnc(topic, qos, payload)
+	log.info("testALiYun.rcvCbFnc", topic, qos, payload)
+end
 ---------------------------------------------------------------------------------------
 local gpio_flag = 0
 local send_imag_flag = 0
@@ -852,40 +848,11 @@ function takePhotoAndSendToMQTT()
 end
 
 ---------------------------------------------------------------------------------------
-function key1IntFun(msg)
-	log.info("testGpioSingle.gpio13IntFnc", msg, key1())
-	--上升沿中断
-	if msg == cpu.INT_GPIO_POSEDGE then
-		--下降沿中断
-	else
-		if send_imag_flag == 0 then --没有在发送
-			gpio_flag = 1
-			send_imag_flag = 1
-			send_imag_count = 0
-		end
-	end
-end
----------------------------------------------------------------------------------------
 
 aLiYun.on("connect", connectCbFnc)
-
-aLiYun.setConnectMode("direct", PRODUCT_KEY .. ".iot-as-mqtt.cn-shanghai.aliyuncs.com", 1883)
-
+aLiYun.setRegion(REGION_ID)
+aLiYun.setConnectMode("direct",PRODUCT_KEY..".iot-as-mqtt."..REGION_ID..".aliyuncs.com",1883)
 aLiYun.setup(PRODUCT_KEY, nil, getDeviceName, getDeviceSecret)
-
-key1 = pins.setup(pio.P0_12, key1IntFun)
-
---检测GPIO状态
-sys.timerLoopStart(
-	function()
-		if gpio_flag == 1 then
-			gpio_flag = 0
-			uart.write(uartID, "gpio_flag\r\n")
-			sys.timerStart(takePhotoAndSendToMQTT, 5)
-		end
-	end,
-	100
-)
 
 --每1分钟拍照上传一次
 sys.timerLoopStart(takePhotoAndSendToMQTT, 30000)
